@@ -1,19 +1,27 @@
 from flask import Flask, request, send_file, jsonify
-import pytesseract
+from google.cloud import vision
 from PIL import Image
 from io import BytesIO
 import openpyxl
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font
-import tempfile
+import os
 import re
-import statistics
 
 app = Flask(__name__)
 
 def clean_number(val):
     val = re.sub(r'[^\d,\.\-]', '', val).replace(',', '.').replace(' ', '')
     return val if re.match(r'^\d+(\.\d+)?$', val) else ''
+
+def ocr_google_vision(image_bytes: bytes) -> str:
+    client = vision.ImageAnnotatorClient()
+    image = vision.Image(content=image_bytes)
+    response = client.text_detection(image=image)
+    texts = response.text_annotations
+    if not texts:
+        return ""
+    return texts[0].description
 
 def parse_ocr_text(ocr_text):
     produkty = []
@@ -23,11 +31,9 @@ def parse_ocr_text(ocr_text):
     czekamy_na_rabat = False
 
     koncowe_frazy = ["PTU", "Kwota", "Suma", "Razem", "Płatność", "RAZEM", "nr:", "Data", "Godzina"]
-
     linie = [l.strip() for l in ocr_text.split('\n') if l.strip()]
 
     for line in linie:
-        # 1. Dwuliniowy produkt
         if linia_oczekujaca:
             match = re.match(r"^([\d, ]+)\s+([\d, ]+)$", line)
             if match:
@@ -53,7 +59,6 @@ def parse_ocr_text(ocr_text):
                     except:
                         pass
 
-        # 2a. Dopasowanie produktowe (regex)
         match = re.match(r"^(.*?)(\d[\d, ]*)\s*\*\s*([\d, ]+)\s+([\d, ]+)\w?$", line)
         if match:
             nazwa = match.group(1).strip() or linia_oczekujaca or ""
@@ -84,7 +89,6 @@ def parse_ocr_text(ocr_text):
             except:
                 pass
 
-        # 2b. Fallback dla spacji w liczbach
         if "*" in line:
             liczby = [clean_number(x) for x in re.findall(r"[\d,\.\s]{1,10}", line) if clean_number(x)]
             if len(liczby) >= 3:
@@ -110,7 +114,6 @@ def parse_ocr_text(ocr_text):
                 except:
                     pass
 
-        # 3. Rabaty
         rabat_match = re.search(r"-([\d,\s\w]+)", line)
         if rabat_match and czekamy_na_rabat and "*" not in line:
             raw = re.sub(r"[^\d,.-]", "", rabat_match.group(1))
@@ -122,15 +125,12 @@ def parse_ocr_text(ocr_text):
                 pass
             continue
 
-        # 4. Koniec rabatów
         if not re.search(r"-\s*[\d,]+", line) and any(line.startswith(f) for f in koncowe_frazy):
             czekamy_na_rabat = False
 
-        # 5. Potencjalna nazwa
         if not re.search(r"\d\s*\*\s*[\d, ]+", line) and not re.search(r"-\s*[\d,]+", line):
             linia_oczekujaca = line.strip()
 
-        # 6. Nowy produkt – zakończ poprzedni
         if re.search(r"\d\s*\*\s*[\d, ]+", line) and ostatni_produkt:
             produkty.append({**ostatni_produkt, "rabat": -tymczasowy_rabat})
             ostatni_produkt = None
@@ -149,8 +149,8 @@ def upload():
         return jsonify({"error": "Brak pliku"}), 400
 
     file = request.files['file']
-    image = Image.open(file.stream)
-    ocr_text = pytesseract.image_to_string(image, lang='pol')
+    image_bytes = file.read()
+    ocr_text = ocr_google_vision(image_bytes)
     produkty = parse_ocr_text(ocr_text)
 
     wb = openpyxl.Workbook()
@@ -183,15 +183,15 @@ def upload():
         f"=SUMIF(G2:G{last_row},\"ona\",F2:F{last_row}) + SUMIF(G2:G{last_row},\"wspolne\",F2:F{last_row})/2"
     )
 
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-        wb.save(tmp.name)
-        tmp.seek(0)
-        return send_file(
-            tmp.name,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            as_attachment=True,
-            download_name="paragon.xlsx"
-        )
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="paragon.xlsx"
+    )
 
 if __name__ == "__main__":
     app.run(debug=True)

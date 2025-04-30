@@ -1,5 +1,5 @@
 Flask
-pytesseract
+google-cloud-vision
 pillow
 openpyxl
 gunicorn
