@@ -22,7 +22,7 @@ def upload():
     image_bytes = file.read()
     ocr_text = ocr_google_vision(image_bytes)
 
-    return jsonify({"ocr_text": ocr_text})
+    return ocr_text, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 if __name__ == "__main__":
     app.run(debug=True)
