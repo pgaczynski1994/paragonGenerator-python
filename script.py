@@ -14,11 +14,17 @@ def clean_number(val):
 def ocr_google_vision(image_bytes: bytes) -> str:
     client = vision.ImageAnnotatorClient()
     image = vision.Image(content=image_bytes)
-    response = client.text_detection(image=image)
-    texts = response.text_annotations
-    if not texts:
-        return ""
-    return texts[0].description
+
+    # Ustaw język OCR na polski
+    image_context = vision.ImageContext(language_hints=["pl"])
+
+    # Użyj dokładniejszego trybu OCR
+    response = client.document_text_detection(image=image, image_context=image_context)
+
+    # Pobierz cały tekst z OCR
+    text = response.full_text_annotation.text if response.full_text_annotation else ""
+
+    return text
 
 def parse_ocr_text_new_format(ocr_text):
     lines = [line.strip() for line in ocr_text.split("\n") if line.strip()]
@@ -76,47 +82,48 @@ def upload():
     file = request.files['file']
     image_bytes = file.read()
     ocr_text = ocr_google_vision(image_bytes)
-    produkty = parse_ocr_text_new_format(ocr_text)
+    return ocr_text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+    # produkty = parse_ocr_text_new_format(ocr_text)
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Paragon"
+    # wb = openpyxl.Workbook()
+    # ws = wb.active
+    # ws.title = "Paragon"
 
-    headers = ["Nazwa", "Ilosc", "Cena jednostkowa", "Cena laczna", "Rabat", "Do zaplaty", "Wlasciciel"]
-    ws.append(headers)
+    # headers = ["Nazwa", "Ilosc", "Cena jednostkowa", "Cena laczna", "Rabat", "Do zaplaty", "Wlasciciel"]
+    # ws.append(headers)
 
-    for prod in produkty:
-        do_zaplaty = prod['cena_laczna'] - prod['rabat']
-        ws.append([
-            prod['nazwa'], prod['ilosc'], prod['cena_jedn'], prod['cena_laczna'],
-            prod['rabat'], do_zaplaty, prod['wlasciciel']
-        ])
+    # for prod in produkty:
+    #     do_zaplaty = prod['cena_laczna'] + prod['rabat']
+    #     ws.append([
+    #         prod['nazwa'], prod['ilosc'], prod['cena_jedn'], prod['cena_laczna'],
+    #         prod['rabat'], do_zaplaty, prod['wlasciciel']
+    #     ])
 
-    for col in range(1, len(headers) + 1):
-        ws.column_dimensions[get_column_letter(col)].width = 18
-    ws.freeze_panes = "A2"
+    # for col in range(1, len(headers) + 1):
+    #     ws.column_dimensions[get_column_letter(col)].width = 18
+    # ws.freeze_panes = "A2"
 
-    last_row = len(produkty) + 1
-    ws[f"E{last_row + 2}"].value = "Suma moje:"
-    ws[f"F{last_row + 2}"].value = f"=SUMIF(G2:G{last_row},\"ja\",F2:F{last_row})"
-    ws[f"E{last_row + 3}"].value = "Suma ona:"
-    ws[f"F{last_row + 3}"].value = f"=SUMIF(G2:G{last_row},\"ona\",F2:F{last_row})"
-    ws[f"E{last_row + 4}"].value = "Suma wspolne:"
-    ws[f"F{last_row + 4}"].value = f"=SUMIF(G2:G{last_row},\"wspolne\",F2:F{last_row})"
-    ws[f"E{last_row + 6}"].value = "Ona ma mi oddac:"
-    ws[f"F{last_row + 6}"].value = (
-        f"=SUMIF(G2:G{last_row},\"ona\",F2:F{last_row}) + SUMIF(G2:G{last_row},\"wspolne\",F2:F{last_row})/2"
-    )
+    # last_row = len(produkty) + 1
+    # ws[f"E{last_row + 2}"].value = "Suma moje:"
+    # ws[f"F{last_row + 2}"].value = f"=SUMIF(G2:G{last_row},\"ja\",F2:F{last_row})"
+    # ws[f"E{last_row + 3}"].value = "Suma ona:"
+    # ws[f"F{last_row + 3}"].value = f"=SUMIF(G2:G{last_row},\"ona\",F2:F{last_row})"
+    # ws[f"E{last_row + 4}"].value = "Suma wspolne:"
+    # ws[f"F{last_row + 4}"].value = f"=SUMIF(G2:G{last_row},\"wspolne\",F2:F{last_row})"
+    # ws[f"E{last_row + 6}"].value = "Ona ma mi oddac:"
+    # ws[f"F{last_row + 6}"].value = (
+    #     f"=SUMIF(G2:G{last_row},\"ona\",F2:F{last_row}) + SUMIF(G2:G{last_row},\"wspolne\",F2:F{last_row})/2"
+    # )
 
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return send_file(
-        output,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name="paragon.xlsx"
-    )
+    # output = BytesIO()
+    # wb.save(output)
+    # output.seek(0)
+    # return send_file(
+    #     output,
+    #     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    #     as_attachment=True,
+    #     download_name="paragon.xlsx"
+    # )
 
 if __name__ == "__main__":
     app.run(debug=True)
